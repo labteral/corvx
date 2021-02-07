@@ -168,7 +168,7 @@ for tweet in BlueBird().search(query, deep=True):
 Search constantly for new results:
 
 ```python
-for tweet in BlueBird().stream(query)
+for tweet in BlueBird().stream(query):
     print(tweet)
 ```
 
