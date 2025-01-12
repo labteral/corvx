@@ -3,7 +3,7 @@ import time
 import urllib.parse
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Generator
+from typing import Optional, Dict, Any, Generator, Union
 
 import requests
 import os
@@ -185,23 +185,20 @@ class Corvx:
 
     def search(
         self,
-        query: Optional[Dict[str, Any]] = None,
-        queries: Optional[list[Dict[str, Any]]] = None,
+        query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
         deep: bool = False,
         limit: Optional[int] = None,
         sleep_time: float = 20,
     ) -> Generator[Dict[str, Any], None, None]:
-        # Handle both single and multiple queries
-        if queries is None and query is not None:
-            queries = [query]
-        elif queries is None and query is None:
-            raise ValueError('Either queries or query must be provided')
+        # Convert single query to list
+        if not isinstance(query, list):
+            query = [query]
 
         # Ensure all queries are dictionaries
         queries = [
             (query_obj if isinstance(query_obj, dict)
              else {'fields': [{'items': [query_obj]}]})
-            for query_obj in queries
+            for query_obj in query
         ]
 
         # Track last API call time to respect rate limits across queries
@@ -557,18 +554,13 @@ class Corvx:
 
     def stream(
         self,
-        query: Optional[Dict[str, Any]] = None,
-        queries: Optional[list[Dict[str, Any]]] = None,
+        query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
         known_posts = CircularOrderedSet(100)
         while True:
             try:
-                for post in self.search(
-                    queries=queries,
-                    query=query,
-                    **kwargs,
-                ):
+                for post in self.search(query=query, **kwargs):
                     if post['id'] not in known_posts:
                         known_posts.add(post['id'])
                         yield post
