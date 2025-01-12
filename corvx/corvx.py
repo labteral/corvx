@@ -215,6 +215,9 @@ class Corvx:
             query_idx: 0 for query_idx in range(len(queries))
         }
 
+        # Initialize active queries set
+        active_queries = set(range(len(queries)))
+
         # For deep search, initialize date boundaries for each query
         current_dates = {}
         min_dates = {}
@@ -241,14 +244,18 @@ class Corvx:
 
                 # Set initial date range
                 current_since = current_until - timedelta(days=1)
-                if min_date and current_since < min_date:
-                    continue
 
+                # Initialize dates even if we might skip this query
                 current_dates[query_idx] = {
                     'until': current_until,
                     'since': current_since,
                 }
                 min_dates[query_idx] = min_date
+
+                # Skip this query if we're already past the minimum date
+                if min_date and current_since < min_date:
+                    active_queries.discard(query_idx)
+                    continue
 
                 # Update query with date range
                 query_copy = current_query.copy()
@@ -263,7 +270,6 @@ class Corvx:
             query_idx: self._encode_query(query_obj)
             for query_idx, query_obj in enumerate(queries)
         }
-        active_queries = set(range(len(queries)))
 
         while active_queries:
             new_posts_found = False
