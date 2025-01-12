@@ -1,45 +1,72 @@
 <p align="center">
-<img src="misc/bluebird.svg" alt="Bluebird Logo" width="150"/></a>
+<img src="misc/corvx.svg" alt="corvx Logo" width="150"/></a>
 </p>
 
 <p align="center">
-    <a href="https://pepy.tech/project/bluebird/"><img alt="Downloads" src="https://img.shields.io/badge/dynamic/json?style=flat-square&maxAge=3600&label=downloads&query=$.total_downloads&url=https://api.pepy.tech/api/projects/bluebird"></a>
-    <a href="https://pypi.python.org/pypi/bluebird/"><img alt="PyPi" src="https://img.shields.io/pypi/v/bluebird.svg?style=flat-square"></a>
-    <!--<a href="https://github.com/brunneis/pygram/releases"><img alt="GitHub releases" src="https://img.shields.io/github/release/brunneis/bluebird.svg?style=flat-square"></a>-->
-    <a href="https://github.com/brunneis/bluebird/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/brunneis/bluebird.svg?style=flat-square&color=green"></a>
+    <a href="https://pepy.tech/project/corvx/"><img alt="Downloads" src="https://img.shields.io/badge/dynamic/json?style=flat-square&maxAge=3600&label=downloads&query=$.total_downloads&url=https://api.pepy.tech/api/projects/corvx"></a>
+    <a href="https://pypi.python.org/pypi/corvx/"><img alt="PyPi" src="https://img.shields.io/pypi/v/corvx.svg?style=flat-square"></a>
+    <!--<a href="https://github.com/labteral/corvx/releases"><img alt="GitHub releases" src="https://img.shields.io/github/release/labteral/corvx.svg?style=flat-square"></a>-->
+    <a href="https://github.com/labteral/corvx/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/labteral/corvx.svg?style=flat-square&color=green"></a>
 </p>
 
 <h3 align="center">
-<b>An unofficial Twitter SDK for Python</b>
+<b>An unofficial X SDK for Python</b>
 </h3>
 
 <p align="center">
-    <a href="https://www.buymeacoffee.com/brunneis" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="35px"></a>
+    <a href="https://www.buymeacoffee.com/labteral" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="35px"></a>
 </p>
 
 # Installation
 
-> bluebird works with Python +3.7
+> corvx works with Python +3.10
 
-You can install the `bluebird` package directly with `pip` / `pip3`:
-
+You can install the `corvx` package directly with `pip`:
 ```bash
-pip install bluebird
+pip install -e .
+```
+or 
+```bash
+pip install corvx
 ```
 
-# Twitter
+# Usage
 
-To work with the Twitter Scraper module you have to import the corresponding module first:
+To work with the X Scraper module you have to import the corresponding module first:
 
 ```python
-from bluebird import BlueBird
+from corvx import Corvx
+
+# You can also set the tokens with environment variables X_AUTH_TOKEN and X_CSRF_TOKEN
+corvx = Corvx(
+    auth_token=os.getenv('X_AUTH_TOKEN'),
+    csrf_token=os.getenv('X_CSRF_TOKEN'),
+)
 ```
 
 The available methods and its usage are described below.
 
-## Query language
+## Query Formats
 
-For both `search` and `stream` methods a JSON-based query language must be used.
+corvx supports two query formats:
+
+### 1. Simple String Format
+
+You can directly pass strings as queries:
+
+```python
+queries = [
+    'python programming',
+    'javascript development',
+]
+
+for tweet in corvx.search(queries=queries):
+    print(tweet)
+```
+
+### 2. Advanced Query Language
+
+For more complex searches, a JSON-based query language is available.
 The query must be specified as a Python dictionary containing a list of fields and global options.
 
 ### Global options
@@ -96,20 +123,19 @@ If not specified, the tweets will match ordinary keywords.
 
 ---
 
-Search for tweets containing 'Santiago' and not 'Chile':
+Simple search with multiple queries:
 
 ```python
-query = {
-    'fields': [
-        {'items': ['Santiago']},
-        {'items': ['Chile'], 'match': 'none'},
-    ]
-}
+# Simple string queries
+queries = ['python', 'javascript']
+for tweet in corvx.search(queries=queries):
+    print(tweet)
 ```
 
-Search for tweets containing 'Santiago' and not 'Chile' written in Spanish:
+Advanced search with a single query:
 
 ```python
+# Advanced query format
 query = {
     'fields': [
         {'items': ['Santiago']},
@@ -117,49 +143,56 @@ query = {
     ],
     'lang': 'es'
 }
-```
 
-Search for tweets containing 'Santiago' and not 'Chile' written in Spanish within a 50-mile radius around Santiago de Compostela.
-
-```python
-query = {
-    'fields': [
-        {'items': ['Santiago']},
-        {'items': ['Chile'], 'match': 'none'},
-    ],
-    'lang': 'es',
-    'near': ('Santiago de Compostela', 50)
-}
-```
-
-Search for tweets containing 'Santiago' and not 'Chile' written in Spanish within a 50-mile radius around Santiago de Compostela in September 2019.
-
-```python
-query = {
-    'fields': [
-        {'items': ['Santiago']},
-        {'items': ['Chile'], 'match': 'none'},
-    ],
-    'lang': 'es',
-    'near': ('Santiago de Compostela', 50),
-    'since': '2019-09-01',
-    'until': '2019-09-30'
-}
-```
-
-## Search
-
-Search for the last 20 results:
-
-```python
-for tweet in BlueBird().search(query):
+for tweet in corvx.search(query=query):
     print(tweet)
 ```
 
-Search for all the available results:
+Advanced search with multiple queries:
 
 ```python
-for tweet in BlueBird().search(query, deep=True):
+# Multiple advanced queries
+queries = [
+    {
+        'fields': [{'items': ['python'], 'match': 'any'}],
+        'lang': 'en'
+    },
+    {
+        'fields': [{'items': ['javascript'], 'match': 'any'}],
+        'lang': 'en'
+    }
+]
+
+for tweet in corvx.search(queries=queries):
+    print(tweet)
+```
+
+## Search Options
+
+### Deep Search
+
+Search for all available results by going back in time:
+
+```python
+for tweet in corvx.search(queries=queries, deep=True):
+    print(tweet)
+```
+
+### Limit Results
+
+Limit the number of results:
+
+```python
+for tweet in corvx.search(queries=queries, limit=100):
+    print(tweet)
+```
+
+### Rate Limiting
+
+Control the time between API calls:
+
+```python
+for tweet in corvx.search(queries=queries, sleep_time=30):
     print(tweet)
 ```
 
@@ -168,68 +201,28 @@ for tweet in BlueBird().search(query, deep=True):
 Search constantly for new results:
 
 ```python
-for tweet in BlueBird().stream(query):
+# Stream with multiple queries
+queries = ['python', 'javascript']
+for tweet in corvx.stream(queries=queries):
     print(tweet)
 ```
 
-## Followings
+## Debug Logging
+
+Enable debug logging to see detailed information:
 
 ```python
-BlueBird().get_followings(username)
-```
+import logging
 
-Example:
+# Configure logging at the start of your script
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='[%(asctime)s] %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
 
-```python
->>> for username in BlueBird().get_followings('dalvarez37'):
-...     print(username)
-
-alfonsopmedina
-juancarlosgp_
-lafuentejuancar
-
-...
-```
-
-## Followers
-
-```python
-BlueBird().get_followers(username)
-```
-
-Example:
-
-```python
->>> for username in BlueBird().get_followers('dalvarez37'):
-...     print(username)
-
-jsierradelarosa
-lafuentejuancar
-crismadrid011
-
-...
-```
-
-<br><br><br><br><br>
-
-> WARNING! It seems that Twitter has disabled the old endpoints so the following functionalities may not work.
-
-
-## List members
-
-```python
-BlueBird().get_list_members(username, list_name)
-```
-
-Example:
-
-```python
->>> for user in BlueBird().get_list_members('dalvarez37', 'xiii-legislatura-congreso'):
-...     print(user)
-
-{'name': 'Eva Bravo', 'screen_name': 'EvaBravoBarco', 'id': '1116022190154113030'}
-{'name': 'Juan José Cortés', 'screen_name': 'JuanjoCortesHu', 'id': '1110994911741050888'}
-{'name': 'José Ignacio Echániz', 'screen_name': 'JIEchaniz', 'id': '1110628846242594820'}
-
-...
+# Configure corvx logger
+logger = logging.getLogger('corvx')
+logger.setLevel(logging.DEBUG)
+logger.propagate = True
 ```

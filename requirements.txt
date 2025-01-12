@@ -1,3 +1,2 @@
 requests
-orderedset
-lxml
+ordered-set

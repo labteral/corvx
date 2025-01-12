@@ -1,6 +1,7 @@
 #!/bin/bash
-rm dist/*
-python3 setup.py install
-python3 setup.py bdist_wheel
+set -e
+cd $(dirname $0)
+rm -rf dist/*.whl
+pip install -r requirements-dev.txt
+python -m build
 twine upload dist/*.whl
-
