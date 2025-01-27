@@ -187,6 +187,7 @@ class Corvx:
         self,
         query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
         deep: bool = False,
+        fast: bool = False,
         limit: Optional[int] = None,
         sleep_time: float = 20,
     ) -> Generator[Dict[str, Any], None, None]:
@@ -215,10 +216,10 @@ class Corvx:
         # Initialize active queries set
         active_queries = set(range(len(queries)))
 
-        # For deep search, initialize date boundaries for each query
+        # For deep search without fast mode, initialize date boundaries for each query
         current_dates = {}
         min_dates = {}
-        if deep:
+        if deep and not fast:
             for query_idx, current_query in enumerate(queries):
                 # Start with today's date
                 current_until = datetime.now().date()
@@ -283,9 +284,16 @@ class Corvx:
                         active_queries.remove(query_idx)
                         continue
 
+                    if fast:
+                        # In fast mode, if cursor repeats, we're done 
+                        # with this query
+                        active_queries.remove(query_idx)
+                        continue
+
                     # Move to previous day if we got new posts
                     if new_posts_in_iteration[query_idx] > 0:
-                        consecutive_empty_days[query_idx] = 0  # Reset counter
+                        # Reset counter
+                        consecutive_empty_days[query_idx] = 0
                         current_dates[query_idx]['until'] = (
                             current_dates[query_idx]['since']
                         )
@@ -347,14 +355,10 @@ class Corvx:
                     # Update query with date range
                     query_copy = current_query.copy()
                     query_until = (
-                        current_dates[query_idx]['until'].strftime(
-                            '%Y-%m-%d',
-                        )
+                        current_dates[query_idx]['until'].strftime('%Y-%m-%d')
                     )
                     query_since = (
-                        current_dates[query_idx]['since'].strftime(
-                            '%Y-%m-%d',
-                        )
+                        current_dates[query_idx]['since'].strftime('%Y-%m-%d')
                     )
                     query_copy['until'] = query_until
                     query_copy['since'] = query_since
@@ -446,10 +450,16 @@ class Corvx:
                         active_queries.remove(query_idx)
                         continue
 
+                    if fast:
+                        # In fast mode, if no entries, we're done 
+                        # with this query
+                        active_queries.remove(query_idx)
+                        continue
+
                     # No entries found, count empty day
                     consecutive_empty_days[query_idx] += 1
                     if consecutive_empty_days[query_idx] >= 30:
-                        active_queries.remove(query_idx)  # Skip this query
+                        active_queries.remove(query_idx)  # Skip query
                         continue
 
                     # Move to previous day
