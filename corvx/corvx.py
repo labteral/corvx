@@ -180,6 +180,68 @@ class Corvx:
 
         return url
 
+    def _make_request(
+        self,
+        url: str,
+        sleep_time: float,
+        raise_on_404: bool = False,
+    ) -> Optional[requests.Response]:
+        """Send a GET request and handle common HTTP issues."""
+        try:
+            response = self.session.get(url)
+        except requests.RequestException as exc:
+            logger.error('Network error: %s', exc)
+            time.sleep(sleep_time)
+            return None
+
+        if response.status_code == 401:
+            raise Exception('Unauthorized: Invalid credentials')
+        if response.status_code == 429:
+            logger.warning('Rate limit exceeded. Sleeping for 15 minutes.')
+            time.sleep(905)
+            return None
+        if response.status_code == 404:
+            logger.info('No results for current window (404).')
+            if raise_on_404:
+                raise NoResultsError('HTTP 404: No results found')
+            return None
+        if response.status_code != 200:
+            logger.error('Failed to fetch data. Status code: %s', response.status_code)
+            logger.error('Response content: %s', response.content)
+            return None
+
+        return response
+
+    @staticmethod
+    def _extract_entries(response_json: Dict[str, Any]) -> tuple[list, Optional[str]]:
+        """Extract timeline entries and cursor from the API response."""
+        try:
+            if 'data' not in response_json:
+                return [], None
+
+            search_data = response_json['data']
+            if 'search_by_raw_query' not in search_data:
+                timeline_data = search_data.get('search_timeline', {})
+            else:
+                timeline_data = search_data['search_by_raw_query'].get('search_timeline', {})
+
+            instructions = timeline_data.get('timeline', {}).get('instructions', [])
+        except (KeyError, TypeError):
+            return [], None
+
+        if not instructions:
+            return [], None
+
+        cursor = None
+        last_instruction = instructions[-1]
+        if last_instruction.get('type') == 'TimelineReplaceEntry':
+            content = last_instruction.get('entry', {}).get('content', {})
+            if content.get('cursorType') == 'Bottom':
+                cursor = content.get('value')
+
+        entries = instructions[0].get('entries', [])
+        return entries, cursor
+
     @staticmethod
     def _shift_one_day_back(
         query_idx: int,
@@ -387,125 +449,62 @@ class Corvx:
                 previous_cursors[query_idx] = current_cursor
 
                 url = self.get_url(encoded_query, current_cursor)
-                try:
-                    response = self.session.get(url)
-                except requests.RequestException as exc:
-                    logger.error('Network error: %s', exc)
-                    time.sleep(sleep_time)
+                response = self._make_request(
+                    url,
+                    sleep_time,
+                    raise_on_404=not deep,
+                )
+                if response is None:
+                    if deep:
+                        consecutive_empty_days[query_idx] += 1
+                        if consecutive_empty_days[query_idx] >= 30:
+                            active_queries.remove(query_idx)
+                            continue
+                        if not self._shift_one_day_back(
+                            query_idx,
+                            current_query,
+                            current_dates,
+                            min_dates,
+                            queries,
+                            encoded_queries,
+                        ):
+                            active_queries.remove(query_idx)
+                            continue
+                        encoded_query = encoded_queries[query_idx]
+                        new_posts_in_iteration[query_idx] = 0
+                        cursors[query_idx] = None
+                        previous_cursors[query_idx] = None
+                    else:
+                        active_queries.remove(query_idx)
                     continue
                 last_api_call = time.time()
 
-                if response.status_code == 401:
-                    raise Exception('Unauthorized: Invalid credentials')
-                elif response.status_code == 429:
-                    logger.warning(
-                        'Rate limit exceeded. Sleeping for 15 minutes.',
-                    )
-                    time.sleep(905)
-                    continue
-                elif response.status_code == 404:
-                    logger.info('No results for current window (404).')
-                    if not deep:
-                        active_queries.remove(query_idx)
-                        continue
-                    if fast:
-                        active_queries.remove(query_idx)
-                        continue
-                    consecutive_empty_days[query_idx] += 1
-                    if consecutive_empty_days[query_idx] >= 30:
-                        active_queries.remove(query_idx)
-                        continue
-                    if not self._shift_one_day_back(
-                        query_idx,
-                        current_query,
-                        current_dates,
-                        min_dates,
-                        queries,
-                        encoded_queries,
-                    ):
-                        active_queries.remove(query_idx)
-                        continue
-                    encoded_query = encoded_queries[query_idx]
-                    new_posts_in_iteration[query_idx] = 0
-                    cursors[query_idx] = None
-                    previous_cursors[query_idx] = None
-                    time.sleep(sleep_time)
-                    continue
-                elif response.status_code != 200:
-                    logger.error(
-                        'Failed to fetch data. Status code: {0}'.format(
-                            response.status_code,
-                        ),
-                    )
-                    logger.error(
-                        'Response content: {0}'.format(response.content),
-                    )
-                    continue
-
-                response_json = response.json()
-
                 try:
-                    # Handle different response structures
-                    if 'data' not in response_json:
-                        logger.warning(
-                            'Unexpected response structure. Retrying...',
-                        )
-                        time.sleep(sleep_time)
-                        continue
-
-                    search_data = response_json['data']
-
-                    if 'search_by_raw_query' not in search_data:
-                        timeline_data = search_data.get('search_timeline', {})
-                    else:
-                        timeline_data = search_data['search_by_raw_query'].get(
-                            'search_timeline',
-                            {},
-                        )
-
-                    if not timeline_data or 'timeline' not in timeline_data:
-                        logger.warning('No timeline data found. Retrying...')
-                        time.sleep(sleep_time)
-                        continue
-
-                    instructions = timeline_data['timeline']['instructions']
-
-                except KeyError as error:
-                    logger.warning(
-                        'Error parsing response structure: {}'.format(
-                            str(error)),
-                    )
+                    response_json = response.json()
+                except ValueError as exc:
+                    logger.error('Invalid JSON response: %s', exc)
                     time.sleep(sleep_time)
                     continue
 
-                last_instruction = instructions[-1]
-                if last_instruction['type'] == 'TimelineReplaceEntry':
-                    if (last_instruction['entry']['content']['cursorType'] ==
-                            'Bottom'):
-                        cursors[query_idx] = (
-                            last_instruction['entry']['content']['value']
-                        )
-
-                entries = instructions[0].get('entries', [])
+                entries, bottom_cursor = self._extract_entries(response_json)
+                if bottom_cursor:
+                    cursors[query_idx] = bottom_cursor
 
                 if not entries:
                     if not deep:
+                        self._check_no_results(posts_yielded)
                         active_queries.remove(query_idx)
                         continue
 
                     if fast:
-                        # In fast mode, if no entries, we're done 
-                        # with this query
                         active_queries.remove(query_idx)
                         continue
 
-                    # No entries found, count empty day
                     consecutive_empty_days[query_idx] += 1
                     if consecutive_empty_days[query_idx] >= 30:
-                        active_queries.remove(query_idx)  # Skip query
+                        active_queries.remove(query_idx)
                         continue
 
-                    # Move to previous day
                     if not self._shift_one_day_back(
                         query_idx,
                         current_query,
@@ -521,6 +520,7 @@ class Corvx:
                     cursors[query_idx] = None
                     previous_cursors[query_idx] = None
                     continue
+
 
                 # Process entries
                 for entry in entries:
@@ -610,4 +610,6 @@ class Corvx:
                 time.sleep(sleep_time)
             except Exception as e:
                 logger.error('Error during post search: {}'.format(str(e)))
+                time.sleep(sleep_time)
+            else:
                 time.sleep(sleep_time)
