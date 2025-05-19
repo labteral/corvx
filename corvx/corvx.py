@@ -33,6 +33,10 @@ if not logger.handlers:
     logger.addHandler(console_handler)
 
 
+class NoResultsError(Exception):
+    """Raised when a query yields no posts."""
+
+
 class Corvx:
     X_CLIENT_TOKEN = (
         'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs'
@@ -56,15 +60,8 @@ class Corvx:
             'X-Csrf-Token': self.csrf_token,
             'Authorization': 'Bearer {0}'.format(self.X_CLIENT_TOKEN),
         }
-
-    @staticmethod
-    def _update_url_with_params(url: str, params: Dict[str, str]) -> str:
-        first = True
-        for key, value in params.items():
-            symbol = '&' if not first else '?'
-            first = False
-            url += '{0}{1}={2}'.format(symbol, key, value)
-        return url
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
 
     @staticmethod
     def _encode_query(query: Dict[str, Any]) -> str:
@@ -183,6 +180,41 @@ class Corvx:
 
         return url
 
+    @staticmethod
+    def _shift_one_day_back(
+        query_idx: int,
+        current_query: Dict[str, Any],
+        current_dates: Dict[int, Dict[str, datetime]],
+        min_dates: Dict[int, Optional[datetime]],
+        queries: list[Dict[str, Any]],
+        encoded_queries: Dict[int, str],
+    ) -> bool:
+        """Move query window one day back.
+
+        Returns ``False`` if the minimum date boundary is exceeded.
+        """
+        current_dates[query_idx]['until'] = current_dates[query_idx]['since']
+        current_dates[query_idx]['since'] = (
+            current_dates[query_idx]['until'] - timedelta(days=1)
+        )
+
+        query_min_date = min_dates[query_idx]
+        if query_min_date and current_dates[query_idx]['since'] < query_min_date:
+            return False
+
+        query_copy = current_query.copy()
+        query_copy['until'] = current_dates[query_idx]['until'].strftime('%Y-%m-%d')
+        query_copy['since'] = current_dates[query_idx]['since'].strftime('%Y-%m-%d')
+        queries[query_idx] = query_copy
+        encoded_queries[query_idx] = Corvx._encode_query(query_copy)
+        return True
+
+    @staticmethod
+    def _check_no_results(new_posts: int) -> None:
+        """Raise :class:`NoResultsError` if no posts were found."""
+        if new_posts == 0:
+            raise NoResultsError('No posts found for query')
+
     def search(
         self,
         query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
@@ -191,6 +223,21 @@ class Corvx:
         limit: Optional[int] = None,
         sleep_time: float = 20,
     ) -> Generator[Dict[str, Any], None, None]:
+        """Search posts matching the given query.
+
+        Args:
+            query: Query definition or list of queries. Each query can be a
+                raw string or a dictionary following the advanced format.
+            deep: If ``True`` paginate backwards in time until no results are
+                left.
+            fast: When combined with ``deep`` stop searching a query as soon as
+                a cursor repeats.
+            limit: Maximum number of posts to yield. ``None`` means unlimited.
+            sleep_time: Delay between requests to avoid rate limits.
+
+        Yields:
+            Dictionaries representing tweets.
+        """
         # Convert single query to list
         if not isinstance(query, list):
             query = [query]
@@ -292,39 +339,17 @@ class Corvx:
 
                     # Move to previous day if we got new posts
                     if new_posts_in_iteration[query_idx] > 0:
-                        # Reset counter
                         consecutive_empty_days[query_idx] = 0
-                        current_dates[query_idx]['until'] = (
-                            current_dates[query_idx]['since']
-                        )
-                        current_dates[query_idx]['since'] = (
-                            current_dates[query_idx]['until'] -
-                            timedelta(days=1)
-                        )
-
-                        # Stop if we hit the minimum date
-                        query_min_date = min_dates[query_idx]
-                        query_since = current_dates[query_idx]['since']
-                        if query_min_date and query_since < query_min_date:
+                        if not self._shift_one_day_back(
+                            query_idx,
+                            current_query,
+                            current_dates,
+                            min_dates,
+                            queries,
+                            encoded_queries,
+                        ):
                             active_queries.remove(query_idx)
                             continue
-
-                        # Update query with date range
-                        query_copy = current_query.copy()
-                        query_until = (
-                            current_dates[query_idx]['until'].strftime(
-                                '%Y-%m-%d',
-                            )
-                        )
-                        query_since = (
-                            current_dates[query_idx]['since'].strftime(
-                                '%Y-%m-%d',
-                            )
-                        )
-                        query_copy['until'] = query_until
-                        query_copy['since'] = query_since
-                        encoded_queries[query_idx] = self._encode_query(
-                            query_copy)
                         encoded_query = encoded_queries[query_idx]
                         new_posts_in_iteration[query_idx] = 0
                         cursors[query_idx] = None
@@ -338,31 +363,16 @@ class Corvx:
                         continue
 
                     # Move to previous day
-                    current_dates[query_idx]['until'] = (
-                        current_dates[query_idx]['since']
-                    )
-                    current_dates[query_idx]['since'] = (
-                        current_dates[query_idx]['until'] - timedelta(days=1)
-                    )
-
-                    # Stop if we hit the minimum date
-                    query_min_date = min_dates[query_idx]
-                    query_since = current_dates[query_idx]['since']
-                    if query_min_date and query_since < query_min_date:
+                    if not self._shift_one_day_back(
+                        query_idx,
+                        current_query,
+                        current_dates,
+                        min_dates,
+                        queries,
+                        encoded_queries,
+                    ):
                         active_queries.remove(query_idx)
                         continue
-
-                    # Update query with date range
-                    query_copy = current_query.copy()
-                    query_until = (
-                        current_dates[query_idx]['until'].strftime('%Y-%m-%d')
-                    )
-                    query_since = (
-                        current_dates[query_idx]['since'].strftime('%Y-%m-%d')
-                    )
-                    query_copy['until'] = query_until
-                    query_copy['since'] = query_since
-                    encoded_queries[query_idx] = self._encode_query(query_copy)
                     encoded_query = encoded_queries[query_idx]
                     new_posts_in_iteration[query_idx] = 0
                     cursors[query_idx] = None
@@ -377,7 +387,12 @@ class Corvx:
                 previous_cursors[query_idx] = current_cursor
 
                 url = self.get_url(encoded_query, current_cursor)
-                response = requests.get(url, headers=self.headers)
+                try:
+                    response = self.session.get(url)
+                except requests.RequestException as exc:
+                    logger.error('Network error: %s', exc)
+                    time.sleep(sleep_time)
+                    continue
                 last_api_call = time.time()
 
                 if response.status_code == 401:
@@ -387,6 +402,34 @@ class Corvx:
                         'Rate limit exceeded. Sleeping for 15 minutes.',
                     )
                     time.sleep(905)
+                    continue
+                elif response.status_code == 404:
+                    logger.info('No results for current window (404).')
+                    if not deep:
+                        active_queries.remove(query_idx)
+                        continue
+                    if fast:
+                        active_queries.remove(query_idx)
+                        continue
+                    consecutive_empty_days[query_idx] += 1
+                    if consecutive_empty_days[query_idx] >= 30:
+                        active_queries.remove(query_idx)
+                        continue
+                    if not self._shift_one_day_back(
+                        query_idx,
+                        current_query,
+                        current_dates,
+                        min_dates,
+                        queries,
+                        encoded_queries,
+                    ):
+                        active_queries.remove(query_idx)
+                        continue
+                    encoded_query = encoded_queries[query_idx]
+                    new_posts_in_iteration[query_idx] = 0
+                    cursors[query_idx] = None
+                    previous_cursors[query_idx] = None
+                    time.sleep(sleep_time)
                     continue
                 elif response.status_code != 200:
                     logger.error(
@@ -463,31 +506,16 @@ class Corvx:
                         continue
 
                     # Move to previous day
-                    current_dates[query_idx]['until'] = (
-                        current_dates[query_idx]['since']
-                    )
-                    current_dates[query_idx]['since'] = (
-                        current_dates[query_idx]['until'] - timedelta(days=1)
-                    )
-
-                    # Stop if we hit the minimum date
-                    query_min_date = min_dates[query_idx]
-                    query_since = current_dates[query_idx]['since']
-                    if query_min_date and query_since < query_min_date:
+                    if not self._shift_one_day_back(
+                        query_idx,
+                        current_query,
+                        current_dates,
+                        min_dates,
+                        queries,
+                        encoded_queries,
+                    ):
                         active_queries.remove(query_idx)
                         continue
-
-                    # Update query with date range
-                    query_copy = current_query.copy()
-                    query_until = (
-                        current_dates[query_idx]['until'].strftime('%Y-%m-%d')
-                    )
-                    query_since = (
-                        current_dates[query_idx]['since'].strftime('%Y-%m-%d')
-                    )
-                    query_copy['until'] = query_until
-                    query_copy['since'] = query_since
-                    encoded_queries[query_idx] = self._encode_query(query_copy)
                     encoded_query = encoded_queries[query_idx]
                     new_posts_in_iteration[query_idx] = 0
                     cursors[query_idx] = None
@@ -557,6 +585,8 @@ class Corvx:
                         return
 
             if not new_posts_found and not deep:
+                if posts_yielded == 0:
+                    self._check_no_results(posts_yielded)
                 return
 
             if limit is not None and posts_yielded >= limit:
@@ -567,6 +597,8 @@ class Corvx:
         query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
+        """Continuously yield new posts matching the query."""
+        sleep_time = kwargs.get('sleep_time', 20)
         known_posts = CircularOrderedSet(100)
         while True:
             try:
@@ -574,5 +606,8 @@ class Corvx:
                     if post['id'] not in known_posts:
                         known_posts.add(post['id'])
                         yield post
+            except NoResultsError:
+                time.sleep(sleep_time)
             except Exception as e:
                 logger.error('Error during post search: {}'.format(str(e)))
+                time.sleep(sleep_time)
