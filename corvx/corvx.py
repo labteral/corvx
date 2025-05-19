@@ -2,7 +2,7 @@ import json
 import time
 import urllib.parse
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Dict, Any, Generator, Union
 
 import requests
@@ -183,6 +183,143 @@ class Corvx:
 
         return url
 
+    def _execute_request(
+        self,
+        query: str,
+        cursor: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Execute a search request and return its JSON response."""
+        url = self.get_url(query, cursor)
+        response = requests.get(url, headers=self.headers)
+        if response.status_code == 401:
+            raise Exception('Unauthorized: Invalid credentials')
+        if response.status_code == 429:
+            logger.warning('Rate limit exceeded. Sleeping for 15 minutes.')
+            time.sleep(905)
+            return None
+        if response.status_code != 200:
+            logger.error(
+                'Failed to fetch data. Status code: {0}'.format(
+                    response.status_code,
+                ),
+            )
+            logger.error('Response content: {0}'.format(response.content))
+            return None
+        return response.json()
+
+    def _extract_entries(
+        self,
+        response_json: Dict[str, Any],
+    ) -> tuple[list[Dict[str, Any]], Optional[str]]:
+        """Extract entries and bottom cursor from a response JSON."""
+        try:
+            if 'data' not in response_json:
+                return [], None
+            search_data = response_json['data']
+            if 'search_by_raw_query' not in search_data:
+                timeline_data = search_data.get('search_timeline', {})
+            else:
+                timeline_data = search_data['search_by_raw_query'].get(
+                    'search_timeline',
+                    {},
+                )
+            if not timeline_data or 'timeline' not in timeline_data:
+                return [], None
+            instructions = timeline_data['timeline']['instructions']
+        except KeyError as error:
+            logger.warning('Error parsing response structure: {}'.format(str(error)))
+            return [], None
+
+        cursor = None
+        last_instruction = instructions[-1]
+        if last_instruction.get('type') == 'TimelineReplaceEntry':
+            content = last_instruction.get('entry', {}).get('content', {})
+            if content.get('cursorType') == 'Bottom':
+                cursor = content.get('value')
+
+        entries = instructions[0].get('entries', [])
+        return entries, cursor
+
+    def _parse_entries(
+        self,
+        entries: list[Dict[str, Any]],
+        known_posts: set[str],
+    ) -> tuple[list[Dict[str, Any]], Optional[str]]:
+        """Parse tweet entries and return tweets with an optional cursor."""
+        tweets: list[Dict[str, Any]] = []
+        cursor: Optional[str] = None
+        for entry in entries:
+            try:
+                data = entry['content']['itemContent']['tweet_results']['result']
+            except KeyError:
+                try:
+                    if (
+                        entry['content']['entryType'] == 'TimelineTimelineCursor'
+                        and entry['content']['cursorType'].lower() == 'bottom'
+                    ):
+                        cursor = entry['content']['value']
+                except KeyError as error:
+                    logger.error('Error processing entry: {}'.format(error))
+                    logger.debug('Entry details: {}'.format(entry))
+                continue
+
+            if 'legacy' not in data:
+                data = data['tweet']
+
+            tweet = data['legacy']
+            tweet_dict = {
+                'id': data['rest_id'],
+                'created_at': int(
+                    datetime.strptime(
+                        tweet['created_at'],
+                        '%a %b %d %H:%M:%S %z %Y',
+                    ).timestamp()
+                ),
+                'full_text': tweet['full_text'],
+                'retweet_count': tweet['retweet_count'],
+                'favorite_count': tweet['favorite_count'],
+            }
+
+            user = data['core']['user_results']['result']
+            tweet_dict.update(
+                {
+                    'name': user['legacy']['name'],
+                    'screen_name': user['legacy']['screen_name'],
+                }
+            )
+
+            if tweet_dict['id'] in known_posts:
+                continue
+            known_posts.add(tweet_dict['id'])
+
+            tweet_dict['url'] = f"https://twitter.com/{tweet_dict['screen_name']}/status/{tweet_dict['id']}"
+            tweets.append(tweet_dict)
+
+        return tweets, cursor
+
+    def _update_date_range(
+        self,
+        query_idx: int,
+        current_query: Dict[str, Any],
+        current_dates: Dict[int, Dict[str, date]],
+        min_dates: Dict[int, Optional[date]],
+        encoded_queries: Dict[int, str],
+    ) -> bool:
+        """Shift search window to the previous day."""
+        current_dates[query_idx]['until'] = current_dates[query_idx]['since']
+        current_dates[query_idx]['since'] = (
+            current_dates[query_idx]['until'] - timedelta(days=1)
+        )
+        min_date = min_dates.get(query_idx)
+        if min_date and current_dates[query_idx]['since'] < min_date:
+            return False
+
+        query_copy = current_query.copy()
+        query_copy['until'] = current_dates[query_idx]['until'].strftime('%Y-%m-%d')
+        query_copy['since'] = current_dates[query_idx]['since'].strftime('%Y-%m-%d')
+        encoded_queries[query_idx] = self._encode_query(query_copy)
+        return True
+
     def search(
         self,
         query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
@@ -191,88 +328,62 @@ class Corvx:
         limit: Optional[int] = None,
         sleep_time: float = 20,
     ) -> Generator[Dict[str, Any], None, None]:
-        # Convert single query to list
         if not isinstance(query, list):
             query = [query]
 
-        # Ensure all queries are dictionaries
         queries = [
-            (query_obj if isinstance(query_obj, dict)
-             else {'fields': [{'items': [query_obj]}]})
-            for query_obj in query
+            q if isinstance(q, dict) else {'fields': [{'items': [q]}]}
+            for q in query
         ]
 
-        # Track last API call time to respect rate limits across queries
         last_api_call = 0.0
-        known_posts = set()
+        known_posts: set[str] = set()
         posts_yielded = 0
-        new_posts_in_iteration = {
-            query_idx: 0 for query_idx in range(len(queries))
-        }
-        consecutive_empty_days = {
-            query_idx: 0 for query_idx in range(len(queries))
-        }
+        new_posts_in_iteration = {i: 0 for i in range(len(queries))}
+        consecutive_empty_days = {i: 0 for i in range(len(queries))}
 
-        # Initialize active queries set
         active_queries = set(range(len(queries)))
 
-        # For deep search without fast mode, initialize date boundaries for each query
-        current_dates = {}
-        min_dates = {}
+        current_dates: Dict[int, Dict[str, date]] = {}
+        min_dates: Dict[int, Optional[date]] = {}
         if deep and not fast:
-            for query_idx, current_query in enumerate(queries):
-                # Start with today's date
+            for idx, current_query in enumerate(queries):
                 current_until = datetime.now().date()
-
-                # If until is set, use it as the upper boundary
                 if 'until' in current_query:
                     query_until = datetime.strptime(
-                        current_query['until'],
-                        '%Y-%m-%d',
+                        current_query['until'], '%Y-%m-%d'
                     ).date()
                     current_until = min(current_until, query_until)
 
-                # Store the lower boundary if since is set
                 min_date = None
                 if 'since' in current_query:
                     min_date = datetime.strptime(
-                        current_query['since'],
-                        '%Y-%m-%d',
+                        current_query['since'], '%Y-%m-%d'
                     ).date()
 
-                # Set initial date range
                 current_since = current_until - timedelta(days=1)
 
-                # Initialize dates even if we might skip this query
-                current_dates[query_idx] = {
-                    'until': current_until,
-                    'since': current_since,
-                }
-                min_dates[query_idx] = min_date
+                current_dates[idx] = {'until': current_until, 'since': current_since}
+                min_dates[idx] = min_date
 
-                # Skip this query if we're already past the minimum date
                 if min_date and current_since < min_date:
-                    active_queries.discard(query_idx)
+                    active_queries.discard(idx)
                     continue
 
-                # Update query with date range
                 query_copy = current_query.copy()
                 query_copy['until'] = current_until.strftime('%Y-%m-%d')
                 query_copy['since'] = current_since.strftime('%Y-%m-%d')
-                queries[query_idx] = query_copy
+                queries[idx] = query_copy
 
-        cursors = {query_idx: None for query_idx in range(len(queries))}
-        previous_cursors = {
-            query_idx: None for query_idx in range(len(queries))}
-        encoded_queries = {
-            query_idx: self._encode_query(query_obj)
-            for query_idx, query_obj in enumerate(queries)
+        cursors: Dict[int, Optional[str]] = {i: None for i in range(len(queries))}
+        previous_cursors: Dict[int, Optional[str]] = {i: None for i in range(len(queries))}
+        encoded_queries: Dict[int, str] = {
+            i: self._encode_query(q) for i, q in enumerate(queries)
         }
 
         while active_queries:
             new_posts_found = False
 
-            # Process one page from each active query
             for query_idx in list(active_queries):
                 current_query = queries[query_idx]
                 current_cursor = cursors[query_idx]
@@ -280,281 +391,89 @@ class Corvx:
                 encoded_query = encoded_queries[query_idx]
 
                 if current_cursor and prev_cursor == current_cursor:
-                    if not deep:
+                    if not deep or fast:
                         active_queries.remove(query_idx)
                         continue
 
-                    if fast:
-                        # In fast mode, if cursor repeats, we're done 
-                        # with this query
-                        active_queries.remove(query_idx)
-                        continue
-
-                    # Move to previous day if we got new posts
                     if new_posts_in_iteration[query_idx] > 0:
-                        # Reset counter
                         consecutive_empty_days[query_idx] = 0
-                        current_dates[query_idx]['until'] = (
-                            current_dates[query_idx]['since']
-                        )
-                        current_dates[query_idx]['since'] = (
-                            current_dates[query_idx]['until'] -
-                            timedelta(days=1)
-                        )
-
-                        # Stop if we hit the minimum date
-                        query_min_date = min_dates[query_idx]
-                        query_since = current_dates[query_idx]['since']
-                        if query_min_date and query_since < query_min_date:
+                    else:
+                        consecutive_empty_days[query_idx] += 1
+                        if consecutive_empty_days[query_idx] >= 30:
                             active_queries.remove(query_idx)
                             continue
 
-                        # Update query with date range
-                        query_copy = current_query.copy()
-                        query_until = (
-                            current_dates[query_idx]['until'].strftime(
-                                '%Y-%m-%d',
-                            )
-                        )
-                        query_since = (
-                            current_dates[query_idx]['since'].strftime(
-                                '%Y-%m-%d',
-                            )
-                        )
-                        query_copy['until'] = query_until
-                        query_copy['since'] = query_since
-                        encoded_queries[query_idx] = self._encode_query(
-                            query_copy)
-                        encoded_query = encoded_queries[query_idx]
-                        new_posts_in_iteration[query_idx] = 0
-                        cursors[query_idx] = None
-                        previous_cursors[query_idx] = None
-                        continue
-
-                    # No new posts, count empty day
-                    consecutive_empty_days[query_idx] += 1
-                    if consecutive_empty_days[query_idx] >= 30:
-                        active_queries.remove(query_idx)  # Skip this query
-                        continue
-
-                    # Move to previous day
-                    current_dates[query_idx]['until'] = (
-                        current_dates[query_idx]['since']
-                    )
-                    current_dates[query_idx]['since'] = (
-                        current_dates[query_idx]['until'] - timedelta(days=1)
-                    )
-
-                    # Stop if we hit the minimum date
-                    query_min_date = min_dates[query_idx]
-                    query_since = current_dates[query_idx]['since']
-                    if query_min_date and query_since < query_min_date:
+                    if not self._update_date_range(
+                        query_idx,
+                        current_query,
+                        current_dates,
+                        min_dates,
+                        encoded_queries,
+                    ):
                         active_queries.remove(query_idx)
                         continue
 
-                    # Update query with date range
-                    query_copy = current_query.copy()
-                    query_until = (
-                        current_dates[query_idx]['until'].strftime('%Y-%m-%d')
-                    )
-                    query_since = (
-                        current_dates[query_idx]['since'].strftime('%Y-%m-%d')
-                    )
-                    query_copy['until'] = query_until
-                    query_copy['since'] = query_since
-                    encoded_queries[query_idx] = self._encode_query(query_copy)
                     encoded_query = encoded_queries[query_idx]
                     new_posts_in_iteration[query_idx] = 0
                     cursors[query_idx] = None
                     previous_cursors[query_idx] = None
                     continue
 
-                # Respect sleep_time between API calls
-                time_since_last_call = time.time() - last_api_call
-                if time_since_last_call < sleep_time:
-                    time.sleep(sleep_time - time_since_last_call)
+                delta = time.time() - last_api_call
+                if delta < sleep_time:
+                    time.sleep(sleep_time - delta)
 
                 previous_cursors[query_idx] = current_cursor
-
-                url = self.get_url(encoded_query, current_cursor)
-                response = requests.get(url, headers=self.headers)
+                response_json = self._execute_request(encoded_query, current_cursor)
                 last_api_call = time.time()
-
-                if response.status_code == 401:
-                    raise Exception('Unauthorized: Invalid credentials')
-                elif response.status_code == 429:
-                    logger.warning(
-                        'Rate limit exceeded. Sleeping for 15 minutes.',
-                    )
-                    time.sleep(905)
-                    continue
-                elif response.status_code != 200:
-                    logger.error(
-                        'Failed to fetch data. Status code: {0}'.format(
-                            response.status_code,
-                        ),
-                    )
-                    logger.error(
-                        'Response content: {0}'.format(response.content),
-                    )
+                if response_json is None:
                     continue
 
-                response_json = response.json()
-
-                try:
-                    # Handle different response structures
-                    if 'data' not in response_json:
-                        logger.warning(
-                            'Unexpected response structure. Retrying...',
-                        )
-                        time.sleep(sleep_time)
-                        continue
-
-                    search_data = response_json['data']
-
-                    if 'search_by_raw_query' not in search_data:
-                        timeline_data = search_data.get('search_timeline', {})
-                    else:
-                        timeline_data = search_data['search_by_raw_query'].get(
-                            'search_timeline',
-                            {},
-                        )
-
-                    if not timeline_data or 'timeline' not in timeline_data:
-                        logger.warning('No timeline data found. Retrying...')
-                        time.sleep(sleep_time)
-                        continue
-
-                    instructions = timeline_data['timeline']['instructions']
-
-                except KeyError as error:
-                    logger.warning(
-                        'Error parsing response structure: {}'.format(
-                            str(error)),
-                    )
-                    time.sleep(sleep_time)
-                    continue
-
-                last_instruction = instructions[-1]
-                if last_instruction['type'] == 'TimelineReplaceEntry':
-                    if (last_instruction['entry']['content']['cursorType'] ==
-                            'Bottom'):
-                        cursors[query_idx] = (
-                            last_instruction['entry']['content']['value']
-                        )
-
-                entries = instructions[0].get('entries', [])
+                entries, bottom_cursor = self._extract_entries(response_json)
+                if bottom_cursor:
+                    cursors[query_idx] = bottom_cursor
 
                 if not entries:
-                    if not deep:
+                    if not deep or fast:
                         active_queries.remove(query_idx)
                         continue
 
-                    if fast:
-                        # In fast mode, if no entries, we're done 
-                        # with this query
-                        active_queries.remove(query_idx)
-                        continue
-
-                    # No entries found, count empty day
                     consecutive_empty_days[query_idx] += 1
                     if consecutive_empty_days[query_idx] >= 30:
-                        active_queries.remove(query_idx)  # Skip query
-                        continue
-
-                    # Move to previous day
-                    current_dates[query_idx]['until'] = (
-                        current_dates[query_idx]['since']
-                    )
-                    current_dates[query_idx]['since'] = (
-                        current_dates[query_idx]['until'] - timedelta(days=1)
-                    )
-
-                    # Stop if we hit the minimum date
-                    query_min_date = min_dates[query_idx]
-                    query_since = current_dates[query_idx]['since']
-                    if query_min_date and query_since < query_min_date:
                         active_queries.remove(query_idx)
                         continue
 
-                    # Update query with date range
-                    query_copy = current_query.copy()
-                    query_until = (
-                        current_dates[query_idx]['until'].strftime('%Y-%m-%d')
-                    )
-                    query_since = (
-                        current_dates[query_idx]['since'].strftime('%Y-%m-%d')
-                    )
-                    query_copy['until'] = query_until
-                    query_copy['since'] = query_since
-                    encoded_queries[query_idx] = self._encode_query(query_copy)
+                    if not self._update_date_range(
+                        query_idx,
+                        current_query,
+                        current_dates,
+                        min_dates,
+                        encoded_queries,
+                    ):
+                        active_queries.remove(query_idx)
+                        continue
+
                     encoded_query = encoded_queries[query_idx]
                     new_posts_in_iteration[query_idx] = 0
                     cursors[query_idx] = None
                     previous_cursors[query_idx] = None
                     continue
 
-                # Process entries
-                for entry in entries:
-                    try:
-                        data = (entry['content']['itemContent']
-                                ['tweet_results']['result'])
-                    except KeyError:
-                        try:
-                            if (entry['content']['entryType'] ==
-                                    'TimelineTimelineCursor'):
-                                if (entry['content']['cursorType'].lower() ==
-                                        'bottom'):
-                                    cursors[query_idx] = (
-                                        entry['content']['value']
-                                    )
-                        except KeyError as error:
-                            logger.error(
-                                'Error processing entry: {}'.format(error),
-                            )
-                            logger.debug(
-                                'Entry details: {}'.format(entry),
-                            )
-                        continue
+                tweets, extra_cursor = self._parse_entries(entries, known_posts)
+                if extra_cursor:
+                    cursors[query_idx] = extra_cursor
 
-                    if 'legacy' not in data:
-                        data = data['tweet']
-
-                    tweet = data['legacy']
-                    tweet = {
-                        'id': data['rest_id'],
-                        'created_at': int(datetime.strptime(
-                            tweet['created_at'],
-                            '%a %b %d %H:%M:%S %z %Y',
-                        ).timestamp()),
-                        'full_text': tweet['full_text'],
-                        'retweet_count': tweet['retweet_count'],
-                        'favorite_count': tweet['favorite_count'],
-                    }
-
-                    user = data['core']['user_results']['result']
-                    user_info = {
-                        'name': user['legacy']['name'],
-                        'screen_name': user['legacy']['screen_name'],
-                    }
-                    tweet.update(user_info)
-
-                    if tweet['id'] in known_posts:
-                        continue
-                    known_posts.add(tweet['id'])
+                if tweets:
                     new_posts_found = True
-                    new_posts_in_iteration[query_idx] += 1
+                    new_posts_in_iteration[query_idx] += len(tweets)
+                    for tweet in tweets:
+                        yield tweet
+                        posts_yielded += 1
+                        if limit is not None and posts_yielded >= limit:
+                            return
 
-                    tweet['url'] = 'https://twitter.com/{0}/status/{1}'.format(
-                        tweet['screen_name'],
-                        tweet['id'],
-                    )
-
-                    yield tweet
-                    posts_yielded += 1
-
-                    if limit is not None and posts_yielded >= limit:
-                        return
+                if limit is not None and posts_yielded >= limit:
+                    return
 
             if not new_posts_found and not deep:
                 return
