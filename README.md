@@ -196,6 +196,22 @@ for tweet in corvx.search(queries=queries, sleep_time=30):
     print(tweet)
 ```
 
+### Handling No Results
+
+Catch `NoResultsError` to detect when no tweets are found:
+
+```python
+from corvx import Corvx, NoResultsError
+
+corvx = Corvx()
+
+try:
+    for tweet in corvx.search(query='my unknown keyword'):
+        print(tweet)
+except NoResultsError:
+    print('No results found')
+```
+
 ## Stream
 
 Search constantly for new results:

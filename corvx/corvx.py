@@ -8,6 +8,8 @@ from typing import Optional, Dict, Any, Generator, Union
 import requests
 import os
 
+from .exceptions import NoResultsError
+
 from .structures import CircularOrderedSet
 
 
@@ -382,6 +384,8 @@ class Corvx:
 
                 if response.status_code == 401:
                     raise Exception('Unauthorized: Invalid credentials')
+                elif response.status_code == 404:
+                    raise NoResultsError('No results found')
                 elif response.status_code == 429:
                     logger.warning(
                         'Rate limit exceeded. Sleeping for 15 minutes.',
@@ -561,6 +565,9 @@ class Corvx:
 
             if limit is not None and posts_yielded >= limit:
                 return
+
+        if posts_yielded == 0:
+            raise NoResultsError('No results found')
 
     def stream(
         self,
