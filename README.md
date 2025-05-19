@@ -203,9 +203,12 @@ Search constantly for new results:
 ```python
 # Stream with multiple queries
 queries = ['python', 'javascript']
-for tweet in corvx.stream(queries=queries):
+for tweet in corvx.stream(queries=queries, sleep_time=30):
     print(tweet)
 ```
+
+Control how long the search should pause between iterations when no new
+posts are found using the `sleep_time` parameter (defaults to 20 seconds).
 
 ## Debug Logging
 

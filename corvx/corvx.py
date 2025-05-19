@@ -565,14 +565,24 @@ class Corvx:
     def stream(
         self,
         query: Union[Dict[str, Any], list[Dict[str, Any]], str, list[str]],
+        sleep_time: float = 20,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
+        search_sleep_time = kwargs.pop('sleep_time', sleep_time)
         known_posts = CircularOrderedSet(100)
         while True:
+            new_posts_found = False
             try:
-                for post in self.search(query=query, **kwargs):
+                for post in self.search(
+                    query=query,
+                    sleep_time=search_sleep_time,
+                    **kwargs,
+                ):
                     if post['id'] not in known_posts:
                         known_posts.add(post['id'])
                         yield post
+                        new_posts_found = True
             except Exception as e:
                 logger.error('Error during post search: {}'.format(str(e)))
+            if not new_posts_found:
+                time.sleep(search_sleep_time)
