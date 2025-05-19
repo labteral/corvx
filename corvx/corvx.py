@@ -377,7 +377,11 @@ class Corvx:
                 previous_cursors[query_idx] = current_cursor
 
                 url = self.get_url(encoded_query, current_cursor)
-                response = requests.get(url, headers=self.headers)
+                response = requests.get(
+                    url,
+                    headers=self.headers,
+                    timeout=10,
+                )
                 last_api_call = time.time()
 
                 if response.status_code == 401:
@@ -399,7 +403,15 @@ class Corvx:
                     )
                     continue
 
-                response_json = response.json()
+                try:
+                    response_json = response.json()
+                except ValueError:
+                    logger.warning(
+                        'Failed to decode JSON. Response content: %s',
+                        response.content,
+                    )
+                    time.sleep(sleep_time)
+                    continue
 
                 try:
                     # Handle different response structures
