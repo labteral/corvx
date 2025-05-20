@@ -298,7 +298,8 @@ class Corvx:
             sleep_time: Delay between requests to avoid rate limits.
 
         Yields:
-            Dictionaries representing tweets.
+            Dictionaries representing tweets. Each tweet includes a
+            ``raw_query`` field with the query string used to fetch it.
         """
         # Convert single query to list
         if not isinstance(query, list):
@@ -577,6 +578,8 @@ class Corvx:
                         tweet['screen_name'],
                         tweet['id'],
                     )
+                    # Include the raw search query used to retrieve this tweet
+                    tweet['raw_query'] = encoded_query
 
                     yield tweet
                     posts_yielded += 1

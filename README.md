@@ -64,6 +64,9 @@ for tweet in corvx.search(queries=queries):
     print(tweet)
 ```
 
+Each tweet dictionary returned by ``search`` or ``stream`` includes a
+``raw_query`` field with the exact query text used to fetch that tweet.
+
 ### 2. Advanced Query Language
 
 For more complex searches, a JSON-based query language is available.
