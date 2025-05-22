@@ -45,6 +45,7 @@ class Corvx:
     X_AUTH_TOKEN = os.getenv('X_AUTH_TOKEN')
     X_CSRF_TOKEN = os.getenv('X_CSRF_TOKEN')
 
+
     def __init__(
         self,
         auth_token: Optional[str] = None,
@@ -62,6 +63,7 @@ class Corvx:
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+
 
     @staticmethod
     def _encode_query(query: Dict[str, Any]) -> str:
@@ -124,6 +126,7 @@ class Corvx:
         ) + '&src=typed_query&f=live')
 
         return encoded_query
+
 
     def get_url(self, query: str, cursor: Optional[str] = None) -> str:
         base_url = (
@@ -190,6 +193,7 @@ class Corvx:
 
         return url
 
+
     def _make_request(
         self,
         url: str,
@@ -222,6 +226,7 @@ class Corvx:
 
         return response
 
+
     @staticmethod
     def _extract_entries(response_json: Dict[str, Any]) -> tuple[list, Optional[str]]:
         """Extract timeline entries and cursor from the API response."""
@@ -252,6 +257,7 @@ class Corvx:
         entries = instructions[0].get('entries', [])
         return entries, cursor
 
+
     @staticmethod
     def _shift_one_day_back(
         query_idx: int,
@@ -281,11 +287,13 @@ class Corvx:
         encoded_queries[query_idx] = Corvx._encode_query(query_copy)
         return True
 
+
     @staticmethod
     def _check_no_results(new_posts: int) -> None:
         """Raise :class:`NoResultsError` if no posts were found."""
         if new_posts == 0:
             raise NoResultsError('No posts found for query')
+
 
     def search(
         self,
@@ -604,6 +612,7 @@ class Corvx:
 
             if limit is not None and posts_yielded >= limit:
                 return
+
 
     def stream(
         self,
