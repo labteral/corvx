@@ -45,6 +45,7 @@ class Corvx:
     X_AUTH_TOKEN = os.getenv('X_AUTH_TOKEN')
     X_CSRF_TOKEN = os.getenv('X_CSRF_TOKEN')
 
+
     def __init__(
         self,
         auth_token: Optional[str] = None,
@@ -62,6 +63,7 @@ class Corvx:
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+
 
     @staticmethod
     def _encode_query(query: Dict[str, Any]) -> str:
@@ -125,9 +127,12 @@ class Corvx:
 
         return encoded_query
 
+
     def get_url(self, query: str, cursor: Optional[str] = None) -> str:
-        base_url = ('https://x.com/i/api/graphql/'
-                    'MJpyQGqgklrVl_0X9gNy3A/SearchTimeline')
+        base_url = (
+            'https://x.com/i/api/graphql/'
+            'hR4IbVJ4MiRt2dpZOR7ZyQ/SearchTimeline'
+        )
 
         payload = {
             'variables': {
@@ -137,32 +142,40 @@ class Corvx:
                 'product': 'Latest',
             },
             'features': {
+                'rweb_video_screen_enabled': False,
+                'profile_label_improvements_pcf_label_in_post_enabled': True,
                 'rweb_tipjar_consumption_enabled': True,
-                'responsive_web_graphql_exclude_directive_enabled': True,
                 'verified_phone_label_enabled': False,
                 'creator_subscriptions_tweet_preview_api_enabled': True,
                 'responsive_web_graphql_timeline_navigation_enabled': True,
                 'responsive_web_graphql_skip_user_profile_image_extensions_'
                 'enabled': False,
+                'premium_content_api_read_enabled': False,
                 'communities_web_enable_tweet_community_results_fetch': True,
                 'c9s_tweet_anatomy_moderator_badge_enabled': True,
+                'responsive_web_grok_analyze_button_fetch_trends_enabled': False,
+                'responsive_web_grok_analyze_post_followups_enabled': True,
+                'responsive_web_jetfuel_frame': False,
+                'responsive_web_grok_share_attachment_enabled': True,
                 'articles_preview_enabled': True,
                 'responsive_web_edit_tweet_api_enabled': True,
                 'graphql_is_translatable_rweb_tweet_is_translatable_'
                 'enabled': True,
                 'view_counts_everywhere_api_enabled': True,
-                'longform_notetweets_inline_media_enabled': True,
                 'longform_notetweets_consumption_enabled': True,
-                'longform_notetweets_rich_text_read_enabled': True,
                 'responsive_web_twitter_article_tweet_consumption_'
                 'enabled': True,
                 'tweet_awards_web_tipping_enabled': False,
+                'responsive_web_grok_show_grok_translated_post': False,
+                'responsive_web_grok_analysis_button_from_backend': True,
                 'creator_subscriptions_quote_tweet_preview_enabled': False,
                 'freedom_of_speech_not_reach_fetch_enabled': True,
                 'standardized_nudges_misinfo': True,
                 'tweet_with_visibility_results_prefer_gql_limited_'
                 'actions_policy_enabled': True,
-                'rweb_video_timestamps_enabled': True,
+                'longform_notetweets_rich_text_read_enabled': True,
+                'longform_notetweets_inline_media_enabled': True,
+                'responsive_web_grok_image_annotation_enabled': True,
                 'responsive_web_enhance_cards_enabled': False,
             },
         }
@@ -179,6 +192,7 @@ class Corvx:
         )
 
         return url
+
 
     def _make_request(
         self,
@@ -212,6 +226,7 @@ class Corvx:
 
         return response
 
+
     @staticmethod
     def _extract_entries(response_json: Dict[str, Any]) -> tuple[list, Optional[str]]:
         """Extract timeline entries and cursor from the API response."""
@@ -242,6 +257,7 @@ class Corvx:
         entries = instructions[0].get('entries', [])
         return entries, cursor
 
+
     @staticmethod
     def _shift_one_day_back(
         query_idx: int,
@@ -271,11 +287,13 @@ class Corvx:
         encoded_queries[query_idx] = Corvx._encode_query(query_copy)
         return True
 
+
     @staticmethod
     def _check_no_results(new_posts: int) -> None:
         """Raise :class:`NoResultsError` if no posts were found."""
         if new_posts == 0:
             raise NoResultsError('No posts found for query')
+
 
     def search(
         self,
@@ -594,6 +612,7 @@ class Corvx:
 
             if limit is not None and posts_yielded >= limit:
                 return
+
 
     def stream(
         self,
