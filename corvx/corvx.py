@@ -60,6 +60,13 @@ class Corvx:
             ),
             'X-Csrf-Token': self.csrf_token,
             'Authorization': 'Bearer {0}'.format(self.X_CLIENT_TOKEN),
+            'Accept': '*/*',
+            'User-Agent': (
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/135.0.0.0 Safari/537.36'
+            ),
+            'X-Twitter-Auth-Type': 'OAuth2Session',
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -131,7 +138,7 @@ class Corvx:
     def get_url(self, query: str, cursor: Optional[str] = None) -> str:
         base_url = (
             'https://x.com/i/api/graphql/'
-            'hR4IbVJ4MiRt2dpZOR7ZyQ/SearchTimeline'
+            'Tp1sewRU1AsZpBWhqCZicQ/SearchTimeline'
         )
 
         payload = {
@@ -178,6 +185,9 @@ class Corvx:
                 'responsive_web_grok_image_annotation_enabled': True,
                 'responsive_web_enhance_cards_enabled': False,
             },
+            'fieldToggles': {
+                'withArticleRichContentState': False,
+            },
         }
 
         if cursor is not None:
@@ -189,6 +199,9 @@ class Corvx:
         )
         url += '&features={0}'.format(
             urllib.parse.quote(json.dumps(payload['features'])),
+        )
+        url += '&fieldToggles={0}'.format(
+            urllib.parse.quote(json.dumps(payload['fieldToggles'])),
         )
 
         return url
