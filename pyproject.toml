@@ -20,7 +20,12 @@ classifiers = [
     'Programming Language :: Python :: Implementation :: PyPy',
     'Topic :: Software Development :: Libraries :: Python Modules',
 ]
-dependencies = ['requests', 'ordered-set']
+dependencies = [
+    'requests', 
+    'beautifulsoup4', 
+    'ordered-set', 
+    'x-client-transaction',
+]
 
 [project.urls]
 Repository = 'https://github.com/labteral/corvx'
