@@ -24,7 +24,7 @@ dependencies = [
     'requests', 
     'beautifulsoup4', 
     'ordered-set', 
-    'x-client-transaction',
+    'xclienttransaction',
 ]
 
 [project.urls]
