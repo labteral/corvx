@@ -1,2 +1,4 @@
 requests
+beautifulsoup4
 ordered-set
+x-client-transaction
