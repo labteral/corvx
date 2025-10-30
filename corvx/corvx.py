@@ -9,8 +9,17 @@ from urllib.parse import urlparse
 import requests
 import os
 import bs4
+import re
 from x_client_transaction.utils import generate_headers, get_ondemand_file_url
 from x_client_transaction import ClientTransaction
+
+# Fix xclienttransaction's regex to handle both single and double quotes
+# The original regex fails with Twitter's current response format
+import x_client_transaction.constants as _xct_constants
+_xct_constants.ON_DEMAND_FILE_REGEX = re.compile(
+    r"""["\']ondemand\.s["\']:\s*["\']([a-f0-9]+)["\']""",
+    flags=(re.VERBOSE | re.MULTILINE)
+)
 
 from .structures import CircularOrderedSet
 
@@ -86,10 +95,8 @@ def _setup_client_transaction() -> Optional[ClientTransaction]:
             response=_home_page_response,
         )
         ondemand_file = session.get(url=ondemand_file_url)
-        _ondemand_file_response = bs4.BeautifulSoup(
-            ondemand_file.content,
-            'html.parser',
-        )
+        # Note: ClientTransaction expects the ondemand file as plain text, not BeautifulSoup
+        _ondemand_file_response = ondemand_file.text
 
         _client_transaction = ClientTransaction(
             home_page_response=_home_page_response,
