@@ -31,7 +31,7 @@ X_CLIENT_TOKEN = (
 )
 SEARCH_BASE_URL = (
     'https://x.com/i/api/graphql/'
-    'Tp1sewRU1AsZpBWhqCZicQ/SearchTimeline'
+    '7r8ibjHuK3MWUyzkzHNMYQ/SearchTimeline'
 )
 HOME_PAGE_URL = 'https://x.com'
 MAX_CONSECUTIVE_EMPTY_DAYS = 30
@@ -251,10 +251,7 @@ class URLBuilder:
         )
         url += '&features={0}'.format(features_param)
 
-        field_toggles_param = urllib.parse.quote(
-            json.dumps(payload['fieldToggles'], separators=(',', ':')),
-        )
-        url += '&fieldToggles={0}'.format(field_toggles_param)
+        # Note: fieldToggles removed - not needed for SearchTimeline
 
         return url
 
@@ -267,11 +264,10 @@ class URLBuilder:
                 'count': DEFAULT_COUNT,
                 'querySource': 'typed_query',
                 'product': 'Latest',
+                'withGrokTranslatedBio': False,  # Added from working URL
             },
             'features': URLBuilder._get_features(),
-            'fieldToggles': {
-                'withArticleRichContentState': False,
-            },
+            # fieldToggles not needed for SearchTimeline
         }
 
         if cursor is not None:
@@ -284,7 +280,9 @@ class URLBuilder:
         """Get the features configuration for API requests."""
         return {
             'rweb_video_screen_enabled': False,
+            'payments_enabled': False,  # Added from working URL
             'profile_label_improvements_pcf_label_in_post_enabled': True,
+            'responsive_web_profile_redirect_enabled': False,  # Added from working URL
             'rweb_tipjar_consumption_enabled': True,
             'verified_phone_label_enabled': False,
             'creator_subscriptions_tweet_preview_api_enabled': True,
@@ -297,7 +295,7 @@ class URLBuilder:
             'responsive_web_grok_analyze_button_fetch_trends_'
             'enabled': False,
             'responsive_web_grok_analyze_post_followups_enabled': True,
-            'responsive_web_jetfuel_frame': False,
+            'responsive_web_jetfuel_frame': True,  # Changed from False to True
             'responsive_web_grok_share_attachment_enabled': True,
             'articles_preview_enabled': True,
             'responsive_web_edit_tweet_api_enabled': True,
@@ -318,6 +316,9 @@ class URLBuilder:
             'longform_notetweets_rich_text_read_enabled': True,
             'longform_notetweets_inline_media_enabled': True,
             'responsive_web_grok_image_annotation_enabled': True,
+            'responsive_web_grok_imagine_annotation_enabled': True,  # Added from working URL
+            'responsive_web_grok_community_note_auto_translation_is_'
+            'enabled': False,  # Added from working URL
             'responsive_web_enhance_cards_enabled': False,
         }
 
@@ -528,19 +529,40 @@ class Corvx:
         self,
         auth_token: Optional[str] = None,
         csrf_token: Optional[str] = None,
+        extra_cookies: Optional[Dict[str, str]] = None,
     ):
         self.auth_token = auth_token or self.X_AUTH_TOKEN
         self.csrf_token = csrf_token or self.X_CSRF_TOKEN
+        self.extra_cookies = extra_cookies or {}
+
+        # Build cookie string
+        cookie_parts = [
+            'auth_token={0}'.format(self.auth_token),
+            'ct0={0}'.format(self.csrf_token),
+        ]
+        # Add any extra cookies
+        for key, value in self.extra_cookies.items():
+            cookie_parts.append('{0}={1}'.format(key, value))
+        cookie_string = '; '.join(cookie_parts)
 
         self.headers = {
+            'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Authorization': 'Bearer {0}'.format(self.X_CLIENT_TOKEN),
             'Content-Type': 'application/json',
-            'Cookie': 'auth_token={0}; ct0={1}'.format(
-                self.auth_token,
-                self.csrf_token,
-            ),
+            'Cookie': cookie_string,
+            'Priority': 'u=1, i',
+            'Referer': 'https://x.com/search',
+            'Sec-Ch-Ua': '"Chromium";v="142", "Brave";v="142", "Not_A Brand";v="99"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"macOS"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
             'X-Csrf-Token': self.csrf_token,
+            'X-Twitter-Active-User': 'yes',  # Critical header
+            'X-Twitter-Auth-Type': 'OAuth2Session',  # Critical header
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)

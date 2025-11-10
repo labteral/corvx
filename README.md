@@ -1,231 +1,258 @@
-<p align="center">
-<img src="misc/corvx.svg" alt="corvx Logo" width="150"/></a>
-</p>
+# Corvx
 
-<p align="center">
-    <a href="https://pepy.tech/project/corvx/"><img alt="Downloads" src="https://img.shields.io/badge/dynamic/json?style=flat-square&maxAge=3600&label=downloads&query=$.total_downloads&url=https://api.pepy.tech/api/projects/corvx"></a>
-    <a href="https://pypi.python.org/pypi/corvx/"><img alt="PyPi" src="https://img.shields.io/pypi/v/corvx.svg?style=flat-square"></a>
-    <!--<a href="https://github.com/labteral/corvx/releases"><img alt="GitHub releases" src="https://img.shields.io/github/release/labteral/corvx.svg?style=flat-square"></a>-->
-    <a href="https://github.com/labteral/corvx/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/labteral/corvx.svg?style=flat-square&color=green"></a>
-</p>
+An unofficial X (Twitter) SDK for Python.
 
-<h3 align="center">
-<b>An unofficial X SDK for Python</b>
-</h3>
+## Overview
 
-<p align="center">
-    <a href="https://www.buymeacoffee.com/labteral" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="35px"></a>
-</p>
+Corvx is a Python library for interacting with X's (formerly Twitter) GraphQL API. It provides a simple interface for searching and retrieving tweets programmatically.
 
-# Installation
+## Requirements
 
-> corvx works with Python +3.10
+- Python >= 3.10
+- Dependencies:
+  - `requests` - HTTP library
+  - `beautifulsoup4` - HTML parsing
+  - `ordered-set` - Data structure utilities
+  - `xclienttransaction` - X-Client-Transaction-Id generation
 
-You can install the `corvx` package directly with `pip`:
-```bash
-pip install -e .
-```
-or 
+## Installation
+
 ```bash
 pip install corvx
 ```
 
-# Usage
+For development:
+```bash
+pip install corvx[dev]
+```
 
-To work with the X Scraper module you have to import the corresponding module first:
+## Authentication
+
+Corvx requires two authentication tokens from X:
+
+1. **auth_token**: Your X authentication token (cookie)
+2. **csrf_token** (ct0): Your CSRF token (cookie)
+
+### Getting Your Tokens
+
+1. Log in to X (twitter.com/x.com) in your browser
+2. Open Developer Tools (F12)
+3. Go to Application/Storage → Cookies → https://x.com
+4. Copy the values for:
+   - `auth_token`
+   - `ct0` (this is your CSRF token)
+
+### Setting Tokens
+
+**Option 1: Environment Variables**
+```bash
+export X_AUTH_TOKEN="your_auth_token_here"
+export X_CSRF_TOKEN="your_csrf_token_here"
+```
+
+**Option 2: Pass to Constructor**
+```python
+from corvx import Corvx
+
+corvx = Corvx(
+    auth_token="your_auth_token_here",
+    csrf_token="your_csrf_token_here"
+)
+```
+
+## Usage
+
+### Basic Search
 
 ```python
 from corvx import Corvx
 
-# You can also set the tokens with environment variables X_AUTH_TOKEN and X_CSRF_TOKEN
+# Initialize
 corvx = Corvx(
-    auth_token=os.getenv('X_AUTH_TOKEN'),
-    csrf_token=os.getenv('X_CSRF_TOKEN'),
+    auth_token="your_auth_token",
+    csrf_token="your_csrf_token"
+)
+
+# Simple search - returns first 20 tweets
+for tweet in corvx.search("python", limit=20):
+    print(f"@{tweet['username']}: {tweet['text']}")
+    print(f"Tweet ID: {tweet['id']}")
+    print()
+```
+
+### Search Parameters
+
+```python
+corvx.search(
+    query="keyword",        # Search query (string or dict)
+    deep=False,            # If True, paginate backwards until no results
+    fast=False,            # Stop when cursor repeats (use with deep=True)
+    limit=None,            # Max tweets to retrieve (None = unlimited)
+    sleep_time=20          # Delay between requests (seconds)
 )
 ```
 
-The available methods and its usage are described below.
-
-## Query Formats
-
-corvx supports two query formats:
-
-### 1. Simple String Format
-
-You can directly pass strings as queries:
+### Deep Search (Historical Data)
 
 ```python
-queries = [
-    'python programming',
-    'javascript development',
-]
-
-for tweet in corvx.search(queries=queries):
-    print(tweet)
+# Get as many tweets as possible going back in time
+for tweet in corvx.search("climate change", deep=True, limit=1000):
+    print(tweet['text'])
 ```
 
-Each tweet dictionary returned by ``search`` or ``stream`` includes a
-``raw_query`` field with the exact query text used to fetch that tweet.
-
-### 2. Advanced Query Language
-
-For more complex searches, a JSON-based query language is available.
-The query must be specified as a Python dictionary containing a list of fields and global options.
-
-### Global options
-
----
-
-#### lang
-
-This option will force the tweets to match a given language. The language must be specified with its ISO 639-1 two-letter code (e.g., `es` for Spanish).
-
-#### since
-
-This parameter refers to the minimum allowed date. It has to be specified in the `YYYY-MM-DD` format.
-
-#### until
-
-This parameter refers to the maximum allowed date. It has to be specified in the `YYYY-MM-DD` format.
-
-#### near
-
-It has to be specified with a `tuple` object composed of a text location and a range in miles (e.g., `('Santiago de Compostela', 15)`).
-
-### Fields
-
----
-
-A query can specify multiple fields which are Python dictionaries with one or more keys and values:
-
-#### items
-
-This is a list of strings, either terms or phrases.
-
-#### exact
-
-If `True`, the specified terms or phrases must match exactly as they were written on the tweets (case/latin insensitive). If this flag is set, the `target` parameter will be ignored.
-
-#### match
-
-If not specified, the tweets will match every item.
-
-- `'any'` (the tweets must match at least one of the items)
-- `'none'` (the tweets won't match any item)
-
-#### target
-
-If not specified, the tweets will match ordinary keywords.
-
-- `'hashtag'` (tweets containing `#item`)
-- `'mention'` (tweets mentioning `@item`)
-- `'from'` (tweets written by `@item`)
-- `'to'` (tweets that are replies to `@item`)
-
-### Examples
-
----
-
-Simple search with multiple queries:
+### Advanced Query Format
 
 ```python
-# Simple string queries
-queries = ['python', 'javascript']
-for tweet in corvx.search(queries=queries):
-    print(tweet)
-```
-
-Advanced search with a single query:
-
-```python
-# Advanced query format
+# Use dictionary for more control
 query = {
-    'fields': [
-        {'items': ['Santiago']},
-        {'items': ['Chile'], 'match': 'none'},
-    ],
-    'lang': 'es'
+    'rawQuery': 'python programming',
+    'count': 20,
+    'querySource': 'typed_query',
+    'product': 'Latest'
 }
 
-for tweet in corvx.search(query=query):
+for tweet in corvx.search(query, limit=100):
     print(tweet)
 ```
 
-Advanced search with multiple queries:
+### Multiple Queries
 
 ```python
-# Multiple advanced queries
-queries = [
-    {
-        'fields': [{'items': ['python'], 'match': 'any'}],
-        'lang': 'en'
-    },
-    {
-        'fields': [{'items': ['javascript'], 'match': 'any'}],
-        'lang': 'en'
-    }
-]
+# Search multiple keywords
+queries = ["python", "javascript", "rust"]
 
-for tweet in corvx.search(queries=queries):
-    print(tweet)
+for tweet in corvx.search(queries, limit=50):
+    print(f"Query: {tweet['raw_query']}")
+    print(f"Tweet: {tweet['text']}")
+    print()
 ```
 
-## Search Options
+## Tweet Data Structure
 
-### Deep Search
-
-Search for all available results by going back in time:
+Each tweet dictionary contains:
 
 ```python
-for tweet in corvx.search(queries=queries, deep=True):
-    print(tweet)
+{
+    'id': '1234567890',
+    'username': 'example_user',
+    'text': 'Tweet content here...',
+    'created_at': '2024-01-01T12:00:00.000Z',
+    'raw_query': 'python',  # The query that returned this tweet
+    # ... additional fields
+}
 ```
 
-### Limit Results
-
-Limit the number of results:
+## Error Handling
 
 ```python
-for tweet in corvx.search(queries=queries, limit=100):
-    print(tweet)
+from corvx import Corvx, NoResultsError
+
+corvx = Corvx(auth_token="...", csrf_token="...")
+
+try:
+    results = list(corvx.search("obscure_query", limit=10))
+    if not results:
+        print("No tweets found")
+except NoResultsError:
+    print("Query returned no results")
+except Exception as e:
+    print(f"Error: {e}")
 ```
 
-### Rate Limiting
+## Rate Limiting
 
-Control the time between API calls:
+X enforces rate limits. Corvx handles this automatically by:
+
+- Sleeping 15 minutes when rate limited (HTTP 429)
+- Default 20-second delay between requests
+- Customizable via `sleep_time` parameter
 
 ```python
-for tweet in corvx.search(queries=queries, sleep_time=30):
-    print(tweet)
+# Faster requests (higher risk of rate limiting)
+corvx.search("query", sleep_time=5, limit=100)
+
+# Slower, safer requests
+corvx.search("query", sleep_time=60, limit=1000)
 ```
 
-## Stream
+## Technical Details
 
-Search constantly for new results:
+### Current API Endpoint
 
-```python
-# Stream with multiple queries
-queries = ['python', 'javascript']
-for tweet in corvx.stream(queries=queries):
-    print(tweet)
-```
+Corvx uses X's GraphQL SearchTimeline endpoint:
+- Endpoint ID: `7r8ibjHuK3MWUyzkzHNMYQ`
+- Base URL: `https://x.com/i/api/graphql/7r8ibjHuK3MWUyzkzHNMYQ/SearchTimeline`
 
-## Debug Logging
+### Required Headers
 
-Enable debug logging to see detailed information:
+The library automatically includes required headers:
+- `Authorization`: Bearer token
+- `X-Csrf-Token`: CSRF token from cookies
+- `X-Twitter-Active-User`: yes
+- `X-Twitter-Auth-Type`: OAuth2Session
+- `X-Client-Transaction-Id`: Generated per request
+- `Sec-Fetch-*`: Browser security headers
+- `User-Agent`: Browser identification
+
+### Transaction ID Generation
+
+Corvx uses the `xclienttransaction` library to generate fresh transaction IDs for each request, matching X's browser behavior.
+
+## Logging
+
+Enable debug logging to see request details:
 
 ```python
 import logging
 
-# Configure logging at the start of your script
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(asctime)s] %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-)
-
-# Configure corvx logger
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('corvx')
 logger.setLevel(logging.DEBUG)
-logger.propagate = True
+
+# Now search will log detailed information
+corvx.search("test", limit=5)
 ```
+
+## Common Issues
+
+### 401 Unauthorized
+- Invalid or expired `auth_token`/`csrf_token`
+- Solution: Get fresh tokens from your browser
+
+### 429 Rate Limited
+- Too many requests
+- Solution: Increase `sleep_time` or wait 15 minutes
+
+### 404 Not Found
+- API endpoint changed (rare)
+- Check library version is up to date
+
+## Development
+
+```bash
+# Clone repository
+git clone https://github.com/labteral/corvx.git
+cd corvx
+
+# Install development dependencies
+pip install -e .[dev]
+
+# Run tests
+python test.py
+```
+
+## License
+
+GNU General Public License v3 (GPLv3)
+
+## Author
+
+Rodrigo Martínez (dev@brunneis.com)
+
+## Repository
+
+https://github.com/labteral/corvx
+
+## Disclaimer
+
+This is an unofficial library and is not affiliated with X Corp. Use at your own risk. Respect X's Terms of Service and API usage policies.

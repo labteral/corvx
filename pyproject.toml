@@ -21,9 +21,9 @@ classifiers = [
     'Topic :: Software Development :: Libraries :: Python Modules',
 ]
 dependencies = [
-    'requests', 
-    'beautifulsoup4', 
-    'ordered-set', 
+    'requests',
+    'beautifulsoup4',
+    'ordered-set',
     'xclienttransaction',
 ]
 
